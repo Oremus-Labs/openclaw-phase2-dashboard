@@ -161,6 +161,9 @@ spec:
         - name: dashboard
           image: node:20-alpine
           command: ["node","/app/server.js"]
+          env:
+            - name: NODE_TLS_REJECT_UNAUTHORIZED
+              value: "0"
           ports:
             - containerPort: 8080
           volumeMounts:
