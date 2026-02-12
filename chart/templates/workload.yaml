@@ -15,33 +15,214 @@ data:
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>OpenClaw Ops Dashboard</title>
+      <title>OpenClaw Operations Center</title>
+      <meta name="description" content="OpenClaw operations dashboard for model routing, safety, and performance." />
       <style>
-        body { font-family: Inter, system-ui, Arial, sans-serif; margin:0; background: #0b1020; color:#eef2ff; }
-        .wrap { max-width: 1100px; margin: 32px auto; padding: 0 18px; }
-        .hero { background: linear-gradient(135deg,#1d4ed8,#7c3aed); border-radius: 16px; padding: 22px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
-        h1 { margin:0 0 8px; font-size: 28px; }
-        .muted{ color:#dbeafe; opacity:.9 }
-        .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin-top:16px; }
-        .card { background:#111831; border:1px solid #243055; border-radius:14px; padding:14px; }
-        .pill { display:inline-block; background:#16a34a; color:white; border-radius:999px; padding:3px 10px; font-size:12px; margin-bottom:8px; }
-        a { color:#93c5fd; text-decoration:none; }
-        ul { margin:8px 0 0 18px; }
+        :root {
+          --bg: #070b16;
+          --bg-soft: #0f172a;
+          --card: #101a33;
+          --border: #263a6b;
+          --text: #eaf0ff;
+          --muted: #a7b8e8;
+          --brand-a: #2563eb;
+          --brand-b: #7c3aed;
+          --ok: #16a34a;
+          --warn: #f59e0b;
+          --bad: #ef4444;
+        }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+          background: radial-gradient(1200px 700px at 85% -10%, #1e293b 0%, var(--bg) 45%);
+          color: var(--text);
+        }
+        .wrap { max-width: 1240px; margin: 28px auto 70px; padding: 0 18px; }
+        .hero {
+          background: linear-gradient(135deg, var(--brand-a), var(--brand-b));
+          border-radius: 20px;
+          padding: 24px;
+          box-shadow: 0 14px 40px rgba(0,0,0,.35);
+          border: 1px solid rgba(255,255,255,.15);
+        }
+        .hero-top {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          flex-wrap: wrap;
+          align-items: flex-start;
+        }
+        h1 { margin: 0 0 8px; font-size: 30px; }
+        .sub { color: #e0e7ff; opacity: .95; max-width: 780px; }
+        .badge {
+          display: inline-flex; align-items: center; gap: 8px;
+          border-radius: 999px; padding: 6px 12px;
+          background: rgba(255,255,255,.18); color: #fff; font-size: 12px;
+          border: 1px solid rgba(255,255,255,.3);
+          margin-right: 8px; margin-top: 8px;
+        }
+        .dot { width: 8px; height: 8px; border-radius: 999px; background: #86efac; box-shadow: 0 0 10px #86efac; }
+        .kpis {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 12px;
+          margin-top: 18px;
+        }
+        .kpi {
+          background: rgba(5,10,25,.4);
+          border: 1px solid rgba(255,255,255,.18);
+          border-radius: 14px;
+          padding: 12px;
+        }
+        .kpi .label { color: #dbeafe; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+        .kpi .val { font-size: 24px; font-weight: 700; margin-top: 2px; }
+        .layout {
+          margin-top: 18px;
+          display: grid;
+          grid-template-columns: 1.2fr 1fr;
+          gap: 14px;
+        }
+        @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+        .card {
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 16px;
+          padding: 16px;
+        }
+        h2 { margin: 0 0 12px; font-size: 18px; }
+        .muted { color: var(--muted); }
+        .status-grid {
+          display:grid;
+          grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+          gap: 10px;
+        }
+        .status-item {
+          background: #0c1530;
+          border: 1px solid #2a3f70;
+          border-radius: 12px;
+          padding: 10px;
+        }
+        .status-pill {
+          font-size: 11px;
+          border-radius: 999px;
+          padding: 3px 8px;
+          display: inline-block;
+          margin-bottom: 6px;
+        }
+        .ok { background: rgba(22,163,74,.2); color: #86efac; border: 1px solid rgba(22,163,74,.4); }
+        .warn { background: rgba(245,158,11,.2); color: #fcd34d; border: 1px solid rgba(245,158,11,.4); }
+        table {
+          width: 100%; border-collapse: collapse; overflow: hidden;
+          border-radius: 12px; border: 1px solid #2a3f70;
+          font-size: 13px;
+        }
+        th, td { padding: 10px; border-bottom: 1px solid #2a3f70; text-align: left; }
+        th { background: #0b1533; color: #c7d7ff; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+        tr:last-child td { border-bottom: none; }
+        .links { display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
+        .link {
+          background:#0b1530; border:1px solid #2a3f70; border-radius: 12px; padding: 10px 12px;
+        }
+        a { color: #93c5fd; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .row { display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+        .btn {
+          display:inline-flex; align-items:center; justify-content:center;
+          background:#1d4ed8; color:white; border:1px solid #3b82f6;
+          padding:8px 12px; border-radius:10px; font-size:13px; text-decoration:none;
+        }
+        .btn.alt { background:#0b1530; border-color:#2a3f70; color:#dbeafe; }
+        footer { margin-top: 16px; color: var(--muted); font-size: 12px; }
       </style>
     </head>
     <body>
       <div class="wrap">
-        <div class="hero">
-          <h1>OpenClaw Phase 2 Operations</h1>
-          <div class="muted">Workers optimization, safety controls, and progressive quality/cost tuning.</div>
+        <section class="hero">
+          <div class="hero-top">
+            <div>
+              <h1>OpenClaw Operations Center</h1>
+              <div class="sub">Professional command dashboard for worker lanes, model routing, reliability controls, and cost-aware operations.</div>
+              <div>
+                <span class="badge"><span class="dot"></span> Production status: Healthy</span>
+                <span class="badge">Mode: Local-first + controlled premium fallback</span>
+              </div>
+            </div>
+            <div class="muted" id="ts">Updated: --</div>
+          </div>
+          <div class="kpis">
+            <div class="kpi"><div class="label">Primary Runtime</div><div class="val">Workers</div></div>
+            <div class="kpi"><div class="label">Local Endpoint</div><div class="val">10.10.10.8:8090</div></div>
+            <div class="kpi"><div class="label">Default Coding Model</div><div class="val">Qwen Coder Next</div></div>
+            <div class="kpi"><div class="label">Fallback Providers</div><div class="val">OpenRouter + Codex</div></div>
+          </div>
+        </section>
+
+        <div class="layout">
+          <section class="card">
+            <h2>System Health Snapshot</h2>
+            <div class="status-grid">
+              <div class="status-item"><span class="status-pill ok">Healthy</span><div><strong>Main OpenClaw</strong></div><div class="muted">Core runtime stable</div></div>
+              <div class="status-item"><span class="status-pill ok">Healthy</span><div><strong>Workers AppSet</strong></div><div class="muted">Synced + self-healing</div></div>
+              <div class="status-item"><span class="status-pill ok">Healthy</span><div><strong>Local LOM</strong></div><div class="muted">ol-llm-service active</div></div>
+              <div class="status-item"><span class="status-pill ok">Healthy</span><div><strong>Premium Auth</strong></div><div class="muted">OAuth + 1Password bootstrap</div></div>
+            </div>
+            <div class="row">
+              <a class="btn" href="https://argocd.oremuslabs.app">Open Argo CD</a>
+              <a class="btn alt" href="https://headlamp.oremuslabs.app">Open Headlamp</a>
+              <a class="btn alt" href="https://home.oremuslabs.app">Open Homepage</a>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>Execution Lanes</h2>
+            <table>
+              <thead>
+                <tr><th>Lane</th><th>Default Model</th><th>Purpose</th><th>Safety</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>General</td><td>qwen3-coder-next</td><td>Default coding + agentic flow</td><td>Local-first</td></tr>
+                <tr><td>Heavy</td><td>gpt-oss:120B</td><td>Long-context & harder synthesis</td><td>Budget-capped</td></tr>
+                <tr><td>Kodak</td><td>openai-codex/gpt-5.3-codex</td><td>Critical quality lane</td><td>OAuth fail-closed</td></tr>
+                <tr><td>Fallback</td><td>OpenRouter model pool</td><td>Provider resilience / overflow</td><td>Feature-flagged controls</td></tr>
+              </tbody>
+            </table>
+          </section>
         </div>
-        <div class="grid">
-          <div class="card"><div class="pill">Live</div><h3>Control Plane</h3><ul><li><a href="https://argocd.oremuslabs.app">Argo CD</a></li><li><a href="https://headlamp.oremuslabs.app">Headlamp</a></li></ul></div>
-          <div class="card"><div class="pill">Workers</div><h3>Model Lanes</h3><ul><li>General: local-first</li><li>Heavy: high-context local</li><li>Kodak: premium/OAuth</li><li>Fallback: OpenRouter</li></ul></div>
-          <div class="card"><div class="pill">Safety</div><h3>Kill / Rollback</h3><ul><li>Worker kill switch available</li><li>Argo revision rollback</li><li>Fail-closed paid auth gate</li></ul></div>
-          <div class="card"><div class="pill">Targets</div><h3>Phase 2 KPI Goals</h3><ul><li>80%+ local request share</li><li>Reduced paid escalation noise</li><li>Stable p95 latency and error budget</li></ul></div>
+
+        <div class="layout">
+          <section class="card">
+            <h2>Operational Playbook</h2>
+            <ul>
+              <li>Default route: <strong>General local lane</strong>.</li>
+              <li>Escalate only on explicit reasons: timeout, low confidence, test failure, critical task.</li>
+              <li>Paid lanes require OAuth/bootstrap secret (fail-closed).</li>
+              <li>Use Argo rollback for release issues; worker kill switch for emergency load shedding.</li>
+            </ul>
+            <div class="row">
+              <a class="btn alt" href="https://github.com/Oremus-Labs/ol-kubernetes-cluster">GitOps Source</a>
+              <a class="btn alt" href="https://github.com/Oremus-Labs/openclaw-phase2-dashboard">Dashboard Repo</a>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>Key Endpoints</h2>
+            <div class="links">
+              <div class="link"><strong>Ops Dashboard</strong><br/><a href="https://openclaw-ops.oremuslabs.app">openclaw-ops.oremuslabs.app</a></div>
+              <div class="link"><strong>OpenClaw UI</strong><br/><a href="https://openclaw.oremuslabs.app">openclaw.oremuslabs.app</a></div>
+              <div class="link"><strong>Open WebUI</strong><br/><a href="https://openwebui.oremuslabs.app">openwebui.oremuslabs.app</a></div>
+              <div class="link"><strong>Search</strong><br/><a href="https://search.oremuslabs.app">search.oremuslabs.app</a></div>
+            </div>
+          </section>
         </div>
+
+        <footer>
+          OpenClaw Ops Dashboard · Phase 2 Professional Edition · private network deployment
+        </footer>
       </div>
+      <script>
+        document.getElementById('ts').textContent = 'Updated: ' + new Date().toLocaleString();
+      </script>
     </body>
     </html>
 ---
