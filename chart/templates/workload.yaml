@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-ops-dashboard-html
+  namespace: {{ .Values.namespace }}
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>OpenClaw Ops Dashboard</title>
+      <style>
+        body { font-family: Inter, system-ui, Arial, sans-serif; margin:0; background: #0b1020; color:#eef2ff; }
+        .wrap { max-width: 1100px; margin: 32px auto; padding: 0 18px; }
+        .hero { background: linear-gradient(135deg,#1d4ed8,#7c3aed); border-radius: 16px; padding: 22px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+        h1 { margin:0 0 8px; font-size: 28px; }
+        .muted{ color:#dbeafe; opacity:.9 }
+        .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin-top:16px; }
+        .card { background:#111831; border:1px solid #243055; border-radius:14px; padding:14px; }
+        .pill { display:inline-block; background:#16a34a; color:white; border-radius:999px; padding:3px 10px; font-size:12px; margin-bottom:8px; }
+        a { color:#93c5fd; text-decoration:none; }
+        ul { margin:8px 0 0 18px; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="hero">
+          <h1>OpenClaw Phase 2 Operations</h1>
+          <div class="muted">Workers optimization, safety controls, and progressive quality/cost tuning.</div>
+        </div>
+        <div class="grid">
+          <div class="card"><div class="pill">Live</div><h3>Control Plane</h3><ul><li><a href="https://argocd.oremuslabs.app">Argo CD</a></li><li><a href="https://headlamp.oremuslabs.app">Headlamp</a></li></ul></div>
+          <div class="card"><div class="pill">Workers</div><h3>Model Lanes</h3><ul><li>General: local-first</li><li>Heavy: high-context local</li><li>Kodak: premium/OAuth</li><li>Fallback: OpenRouter</li></ul></div>
+          <div class="card"><div class="pill">Safety</div><h3>Kill / Rollback</h3><ul><li>Worker kill switch available</li><li>Argo revision rollback</li><li>Fail-closed paid auth gate</li></ul></div>
+          <div class="card"><div class="pill">Targets</div><h3>Phase 2 KPI Goals</h3><ul><li>80%+ local request share</li><li>Reduced paid escalation noise</li><li>Stable p95 latency and error budget</li></ul></div>
+        </div>
+      </div>
+    </body>
+    </html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw-ops-dashboard
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openclaw-ops-dashboard
+  template:
+    metadata:
+      labels:
+        app: openclaw-ops-dashboard
+    spec:
+      containers:
+        - name: nginx
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+      volumes:
+        - name: html
+          configMap:
+            name: openclaw-ops-dashboard-html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openclaw-ops-dashboard
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: openclaw-ops-dashboard
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 80
+      protocol: TCP
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: openclaw-ops-dashboard
+  namespace: {{ .Values.namespace }}
+spec:
+  entryPoints:
+    - {{ .Values.ingress.entryPoint }}
+  routes:
+    - kind: Rule
+      match: Host(`{{ .Values.ingress.host }}`)
+      services:
+        - name: openclaw-ops-dashboard
+          port: {{ .Values.service.port }}
+  tls:
+    secretName: {{ .Values.ingress.tlsSecretName }}

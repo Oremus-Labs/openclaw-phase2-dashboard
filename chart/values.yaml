@@ -1,0 +1,14 @@
+namespace: openclaw-ops
+
+image:
+  repository: nginx
+  tag: "1.27-alpine"
+  pullPolicy: IfNotPresent
+
+service:
+  port: 80
+
+ingress:
+  host: openclaw-ops.oremuslabs.app
+  entryPoint: websecure
+  tlsSecretName: oremuslabs-app-wildcard-tls

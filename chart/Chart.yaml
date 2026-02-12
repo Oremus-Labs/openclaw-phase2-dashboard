@@ -1,0 +1,6 @@
+apiVersion: v2
+name: openclaw-phase2-dashboard
+description: Nice UI dashboard for OpenClaw workers phase 2 operations
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
