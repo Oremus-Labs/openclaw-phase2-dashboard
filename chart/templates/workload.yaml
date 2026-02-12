@@ -4,227 +4,142 @@ metadata:
   name: {{ .Values.namespace }}
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openclaw-ops-dashboard
+  namespace: {{ .Values.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openclaw-ops-dashboard-read
+rules:
+  - apiGroups: [""]
+    resources: ["pods","services","events","namespaces"]
+    verbs: ["get","list","watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get","list","watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openclaw-ops-dashboard-read
+subjects:
+  - kind: ServiceAccount
+    name: openclaw-ops-dashboard
+    namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openclaw-ops-dashboard-read
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: openclaw-ops-dashboard-html
+  name: openclaw-ops-dashboard-app
   namespace: {{ .Values.namespace }}
 data:
+  server.js: |
+    const http = require('http');
+    const fs = require('fs');
+    const path = require('path');
+
+    const tokenPath = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+    const caPath = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
+    const token = fs.readFileSync(tokenPath, 'utf8');
+
+    async function k8s(pathname) {
+      const res = await fetch('https://kubernetes.default.svc' + pathname, {
+        headers: { Authorization: `Bearer ${token}` },
+        agent: undefined,
+      });
+      if (!res.ok) throw new Error(`k8s ${pathname} ${res.status}`);
+      return await res.json();
+    }
+
+    function summarizeDeploy(items) {
+      return items.map(d => ({
+        name: d.metadata.name,
+        ns: d.metadata.namespace,
+        ready: `${d.status.readyReplicas || 0}/${d.status.replicas || 0}`,
+        available: d.status.availableReplicas || 0,
+      }));
+    }
+
+    const server = http.createServer(async (req, res) => {
+      if (req.url === '/api/status') {
+        try {
+          const [workersDeploy, workersHpa, mainDeploy] = await Promise.all([
+            k8s('/apis/apps/v1/namespaces/openclaw-workers/deployments'),
+            k8s('/apis/autoscaling/v2/namespaces/openclaw-workers/horizontalpodautoscalers'),
+            k8s('/apis/apps/v1/namespaces/openclaw/deployments'),
+          ]);
+          const payload = {
+            generatedAt: new Date().toISOString(),
+            workers: summarizeDeploy(workersDeploy.items || []),
+            main: summarizeDeploy(mainDeploy.items || []),
+            hpas: (workersHpa.items || []).map(h => ({ name: h.metadata.name, min: h.spec.minReplicas, max: h.spec.maxReplicas })),
+            alerts: [],
+          };
+          const bad = payload.workers.filter(w => {
+            const [r,t] = w.ready.split('/').map(Number);
+            return t > 0 && r < t;
+          });
+          if (bad.length) payload.alerts.push({ level:'warn', text:`${bad.length} worker deployment(s) not fully ready` });
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(payload));
+        } catch (e) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: String(e) }));
+        }
+        return;
+      }
+      const p = path.join('/app', 'index.html');
+      const html = fs.readFileSync(p, 'utf8');
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(html);
+    });
+
+    server.listen(8080, '0.0.0.0');
   index.html: |
     <!doctype html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>OpenClaw Operations Center</title>
-      <meta name="description" content="OpenClaw operations dashboard for model routing, safety, and performance." />
-      <style>
-        :root {
-          --bg: #070b16;
-          --bg-soft: #0f172a;
-          --card: #101a33;
-          --border: #263a6b;
-          --text: #eaf0ff;
-          --muted: #a7b8e8;
-          --brand-a: #2563eb;
-          --brand-b: #7c3aed;
-          --ok: #16a34a;
-          --warn: #f59e0b;
-          --bad: #ef4444;
-        }
-        * { box-sizing: border-box; }
-        body {
-          margin: 0;
-          font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-          background: radial-gradient(1200px 700px at 85% -10%, #1e293b 0%, var(--bg) 45%);
-          color: var(--text);
-        }
-        .wrap { max-width: 1240px; margin: 28px auto 70px; padding: 0 18px; }
-        .hero {
-          background: linear-gradient(135deg, var(--brand-a), var(--brand-b));
-          border-radius: 20px;
-          padding: 24px;
-          box-shadow: 0 14px 40px rgba(0,0,0,.35);
-          border: 1px solid rgba(255,255,255,.15);
-        }
-        .hero-top {
-          display: flex;
-          justify-content: space-between;
-          gap: 16px;
-          flex-wrap: wrap;
-          align-items: flex-start;
-        }
-        h1 { margin: 0 0 8px; font-size: 30px; }
-        .sub { color: #e0e7ff; opacity: .95; max-width: 780px; }
-        .badge {
-          display: inline-flex; align-items: center; gap: 8px;
-          border-radius: 999px; padding: 6px 12px;
-          background: rgba(255,255,255,.18); color: #fff; font-size: 12px;
-          border: 1px solid rgba(255,255,255,.3);
-          margin-right: 8px; margin-top: 8px;
-        }
-        .dot { width: 8px; height: 8px; border-radius: 999px; background: #86efac; box-shadow: 0 0 10px #86efac; }
-        .kpis {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-          gap: 12px;
-          margin-top: 18px;
-        }
-        .kpi {
-          background: rgba(5,10,25,.4);
-          border: 1px solid rgba(255,255,255,.18);
-          border-radius: 14px;
-          padding: 12px;
-        }
-        .kpi .label { color: #dbeafe; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
-        .kpi .val { font-size: 24px; font-weight: 700; margin-top: 2px; }
-        .layout {
-          margin-top: 18px;
-          display: grid;
-          grid-template-columns: 1.2fr 1fr;
-          gap: 14px;
-        }
-        @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
-        .card {
-          background: var(--card);
-          border: 1px solid var(--border);
-          border-radius: 16px;
-          padding: 16px;
-        }
-        h2 { margin: 0 0 12px; font-size: 18px; }
-        .muted { color: var(--muted); }
-        .status-grid {
-          display:grid;
-          grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-          gap: 10px;
-        }
-        .status-item {
-          background: #0c1530;
-          border: 1px solid #2a3f70;
-          border-radius: 12px;
-          padding: 10px;
-        }
-        .status-pill {
-          font-size: 11px;
-          border-radius: 999px;
-          padding: 3px 8px;
-          display: inline-block;
-          margin-bottom: 6px;
-        }
-        .ok { background: rgba(22,163,74,.2); color: #86efac; border: 1px solid rgba(22,163,74,.4); }
-        .warn { background: rgba(245,158,11,.2); color: #fcd34d; border: 1px solid rgba(245,158,11,.4); }
-        table {
-          width: 100%; border-collapse: collapse; overflow: hidden;
-          border-radius: 12px; border: 1px solid #2a3f70;
-          font-size: 13px;
-        }
-        th, td { padding: 10px; border-bottom: 1px solid #2a3f70; text-align: left; }
-        th { background: #0b1533; color: #c7d7ff; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
-        tr:last-child td { border-bottom: none; }
-        .links { display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
-        .link {
-          background:#0b1530; border:1px solid #2a3f70; border-radius: 12px; padding: 10px 12px;
-        }
-        a { color: #93c5fd; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        .row { display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
-        .btn {
-          display:inline-flex; align-items:center; justify-content:center;
-          background:#1d4ed8; color:white; border:1px solid #3b82f6;
-          padding:8px 12px; border-radius:10px; font-size:13px; text-decoration:none;
-        }
-        .btn.alt { background:#0b1530; border-color:#2a3f70; color:#dbeafe; }
-        footer { margin-top: 16px; color: var(--muted); font-size: 12px; }
-      </style>
-    </head>
-    <body>
-      <div class="wrap">
-        <section class="hero">
-          <div class="hero-top">
-            <div>
-              <h1>OpenClaw Operations Center</h1>
-              <div class="sub">Professional command dashboard for worker lanes, model routing, reliability controls, and cost-aware operations.</div>
-              <div>
-                <span class="badge"><span class="dot"></span> Production status: Healthy</span>
-                <span class="badge">Mode: Local-first + controlled premium fallback</span>
-              </div>
-            </div>
-            <div class="muted" id="ts">Updated: --</div>
-          </div>
-          <div class="kpis">
-            <div class="kpi"><div class="label">Primary Runtime</div><div class="val">Workers</div></div>
-            <div class="kpi"><div class="label">Local Endpoint</div><div class="val">10.10.10.8:8090</div></div>
-            <div class="kpi"><div class="label">Default Coding Model</div><div class="val">Qwen Coder Next</div></div>
-            <div class="kpi"><div class="label">Fallback Providers</div><div class="val">OpenRouter + Codex</div></div>
-          </div>
-        </section>
-
-        <div class="layout">
-          <section class="card">
-            <h2>System Health Snapshot</h2>
-            <div class="status-grid">
-              <div class="status-item"><span class="status-pill ok">Healthy</span><div><strong>Main OpenClaw</strong></div><div class="muted">Core runtime stable</div></div>
-              <div class="status-item"><span class="status-pill ok">Healthy</span><div><strong>Workers AppSet</strong></div><div class="muted">Synced + self-healing</div></div>
-              <div class="status-item"><span class="status-pill ok">Healthy</span><div><strong>Local LOM</strong></div><div class="muted">ol-llm-service active</div></div>
-              <div class="status-item"><span class="status-pill ok">Healthy</span><div><strong>Premium Auth</strong></div><div class="muted">OAuth + 1Password bootstrap</div></div>
-            </div>
-            <div class="row">
-              <a class="btn" href="https://argocd.oremuslabs.app">Open Argo CD</a>
-              <a class="btn alt" href="https://headlamp.oremuslabs.app">Open Headlamp</a>
-              <a class="btn alt" href="https://home.oremuslabs.app">Open Homepage</a>
-            </div>
-          </section>
-
-          <section class="card">
-            <h2>Execution Lanes</h2>
-            <table>
-              <thead>
-                <tr><th>Lane</th><th>Default Model</th><th>Purpose</th><th>Safety</th></tr>
-              </thead>
-              <tbody>
-                <tr><td>General</td><td>qwen3-coder-next</td><td>Default coding + agentic flow</td><td>Local-first</td></tr>
-                <tr><td>Heavy</td><td>gpt-oss:120B</td><td>Long-context & harder synthesis</td><td>Budget-capped</td></tr>
-                <tr><td>Kodak</td><td>openai-codex/gpt-5.3-codex</td><td>Critical quality lane</td><td>OAuth fail-closed</td></tr>
-                <tr><td>Fallback</td><td>OpenRouter model pool</td><td>Provider resilience / overflow</td><td>Feature-flagged controls</td></tr>
-              </tbody>
-            </table>
-          </section>
-        </div>
-
-        <div class="layout">
-          <section class="card">
-            <h2>Operational Playbook</h2>
-            <ul>
-              <li>Default route: <strong>General local lane</strong>.</li>
-              <li>Escalate only on explicit reasons: timeout, low confidence, test failure, critical task.</li>
-              <li>Paid lanes require OAuth/bootstrap secret (fail-closed).</li>
-              <li>Use Argo rollback for release issues; worker kill switch for emergency load shedding.</li>
-            </ul>
-            <div class="row">
-              <a class="btn alt" href="https://github.com/Oremus-Labs/ol-kubernetes-cluster">GitOps Source</a>
-              <a class="btn alt" href="https://github.com/Oremus-Labs/openclaw-phase2-dashboard">Dashboard Repo</a>
-            </div>
-          </section>
-
-          <section class="card">
-            <h2>Key Endpoints</h2>
-            <div class="links">
-              <div class="link"><strong>Ops Dashboard</strong><br/><a href="https://openclaw-ops.oremuslabs.app">openclaw-ops.oremuslabs.app</a></div>
-              <div class="link"><strong>OpenClaw UI</strong><br/><a href="https://openclaw.oremuslabs.app">openclaw.oremuslabs.app</a></div>
-              <div class="link"><strong>Open WebUI</strong><br/><a href="https://openwebui.oremuslabs.app">openwebui.oremuslabs.app</a></div>
-              <div class="link"><strong>Search</strong><br/><a href="https://search.oremuslabs.app">search.oremuslabs.app</a></div>
-            </div>
-          </section>
-        </div>
-
-        <footer>
-          OpenClaw Ops Dashboard · Phase 2 Professional Edition · private network deployment
-        </footer>
+    <html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>OpenClaw Operations Center</title>
+    <style>
+      body{font-family:Inter,system-ui;background:#070b16;color:#eaf0ff;margin:0}.wrap{max-width:1200px;margin:24px auto;padding:0 16px}
+      .hero{background:linear-gradient(135deg,#2563eb,#7c3aed);padding:20px;border-radius:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:14px}
+      .card{background:#101a33;border:1px solid #263a6b;border-radius:12px;padding:12px}.muted{color:#a7b8e8}.ok{color:#86efac}.warn{color:#fcd34d}
+      table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid #263a6b;text-align:left}
+      .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:900px){.row{grid-template-columns:1fr}}
+    </style></head>
+    <body><div class="wrap">
+      <div class="hero"><h1>OpenClaw Operations Center</h1><div class="muted">Live operations dashboard · private network deployment</div><div id="time" class="muted"></div></div>
+      <div class="row" style="margin-top:12px">
+        <div class="card"><h3>Main OpenClaw</h3><div id="main">Loading…</div></div>
+        <div class="card"><h3>Worker Lanes</h3><div id="workers">Loading…</div></div>
       </div>
-      <script>
-        document.getElementById('ts').textContent = 'Updated: ' + new Date().toLocaleString();
-      </script>
-    </body>
-    </html>
+      <div class="grid">
+        <div class="card"><h3>Autoscaling Policies</h3><div id="hpa">Loading…</div></div>
+        <div class="card"><h3>Alerts</h3><div id="alerts">Loading…</div></div>
+        <div class="card"><h3>Runbook</h3><ul><li>Local-first routing</li><li>OAuth fail-closed for premium</li><li>OpenRouter fallback guarded</li><li>Kill switch + Argo rollback</li></ul></div>
+      </div>
+    </div>
+    <script>
+      async function load(){
+        const r=await fetch('/api/status'); const j=await r.json();
+        document.getElementById('time').textContent='Updated: '+new Date(j.generatedAt).toLocaleString();
+        document.getElementById('main').innerHTML=(j.main||[]).map(d=>`<div><b>${d.name}</b> <span class='ok'>${d.ready}</span></div>`).join('')||'No data';
+        document.getElementById('workers').innerHTML=(j.workers||[]).map(d=>`<div><b>${d.name}</b> <span class='${d.ready.startsWith('0/')?'warn':'ok'}'>${d.ready}</span></div>`).join('')||'No data';
+        document.getElementById('hpa').innerHTML='<table><tr><th>Name</th><th>Range</th></tr>'+(j.hpas||[]).map(h=>`<tr><td>${h.name}</td><td>${h.min}-${h.max}</td></tr>`).join('')+'</table>';
+        document.getElementById('alerts').innerHTML=(j.alerts&&j.alerts.length)?j.alerts.map(a=>`<div class='warn'>• ${a.text}</div>`).join(''):'<div class="ok">No active alerts</div>';
+      }
+      load(); setInterval(load,15000);
+    </script>
+    </body></html>
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -241,20 +156,24 @@ spec:
       labels:
         app: openclaw-ops-dashboard
     spec:
+      serviceAccountName: openclaw-ops-dashboard
       containers:
-        - name: nginx
-          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+        - name: dashboard
+          image: node:20-alpine
+          command: ["node","/app/server.js"]
           ports:
-            - containerPort: 80
+            - containerPort: 8080
           volumeMounts:
-            - name: html
-              mountPath: /usr/share/nginx/html/index.html
+            - name: app
+              mountPath: /app/server.js
+              subPath: server.js
+            - name: app
+              mountPath: /app/index.html
               subPath: index.html
       volumes:
-        - name: html
+        - name: app
           configMap:
-            name: openclaw-ops-dashboard-html
+            name: openclaw-ops-dashboard-app
 ---
 apiVersion: v1
 kind: Service
@@ -266,7 +185,7 @@ spec:
     app: openclaw-ops-dashboard
   ports:
     - port: {{ .Values.service.port }}
-      targetPort: 80
+      targetPort: 8080
       protocol: TCP
 ---
 apiVersion: traefik.io/v1alpha1
